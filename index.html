@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="theme-color" content="#ff2975" />
+<title>Apology Kiss Machine 💋</title>
+<style>
+  :root{
+    --bg1:#ffdee9; --bg2:#b5fffc; --text:#111; --accent:#ff2975; --card:rgba(255,255,255,.9);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Color Emoji", "Apple Color Emoji", sans-serif;
+    background: linear-gradient(135deg,var(--bg1),var(--bg2));
+    display:flex; align-items:center; justify-content:center;
+  }
+  .container{
+    width:min(720px,92vw); text-align:center; background:var(--card);
+    backdrop-filter: blur(6px);
+    border-radius:24px; padding:28px 22px 30px;
+    box-shadow:0 22px 60px rgba(0,0,0,.16);
+  }
+  h1,h2,p{margin:0 0 12px; color:var(--text)}
+  .big{font-size:clamp(26px,6vw,42px); line-height:1.12}
+  .buttons{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:14px}
+  button{
+    appearance:none; border:none; border-radius:999px; padding:14px 22px;
+    font-weight:700; font-size:16px; cursor:pointer; color:#fff; background:#111;
+    transition: transform .18s ease, box-shadow .18s ease, background .18s ease, opacity .18s ease;
+    user-select:none;
+  }
+  button:active{transform:translateY(1px) scale(.98)}
+  button.secondary{background:#fff; color:#111; border:2px solid #111}
+  #yesBtn{background:var(--accent)}
+  #noBtn{background:#222}
+  .hidden{display:none !important}
+
+  /* Kisses layer */
+  #kissCanvas{position:fixed; inset:0; pointer-events:none; overflow:hidden; z-index:20}
+  .kiss{
+    position:absolute; font-size:28px; filter: drop-shadow(0 6px 6px rgba(0,0,0,.25));
+    animation: floatUp linear forwards; opacity:0;
+  }
+  @keyframes floatUp{
+    0%{ transform: translateY(20px) scale(.9) rotate(0deg); opacity:0 }
+    10%{ opacity:1 }
+    100%{ transform: translateY(-110vh) scale(1.2) rotate(360deg); opacity:0 }
+  }
+
+  .badge{
+    display:inline-flex; align-items:center; gap:8px; background:#fff; color:#111;
+    border:1px dashed #111; padding:8px 12px; border-radius:999px; font-size:14px;
+    margin:6px 0 12px;
+  }
+  .chips{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:8px}
+  .chips button{background:#fff; color:#111; border:1px solid #111; padding:10px 14px}
+  footer{margin-top:14px; font-size:13px; opacity:.7}
+
+  /* Giant YES overlay when NO keeps getting tapped */
+  .overlay{position:fixed; inset:0; display:grid; place-items:center; background:rgba(255,41,117,.08); z-index:15}
+  .overlay .giant{
+    font-size:min(30vw,180px); padding:18px 28px; background:var(--accent); color:#fff;
+    border:none; border-radius:40px; box-shadow:0 20px 60px rgba(255,41,117,.4);
+  }
+
+  .muted{opacity:.5}
+  .toggle{font-size:13px; background:transparent; border:none; text-decoration:underline; color:#333}
+</style>
+</head>
+<body>
+
+<!-- floating kisses -->
+<div id="kissCanvas" aria-hidden="true"></div>
+
+<!-- Screen 1: intro -->
+<div class="container" id="screen1">
+  <h1 class="big">Hey love ❤️</h1>
+  <p>I have one <em>very</em> important question for you…</p>
+  <div class="buttons">
+    <button id="startBtn">Ask me 👀</button>
+  </div>
+</div>
+
+<!-- Screen 2: YES / NO -->
+<div class="container hidden" id="screen2">
+  <h2 class="big">Do you want an apology kissy from me? 💋</h2>
+  <p class="badge">You can say no… but I might cry a little 😢</p>
+  <div class="buttons">
+    <button id="yesBtn" aria-label="Yes, give me kisses!">YES</button>
+    <button id="noBtn" aria-label="No">NO</button>
+  </div>
+  <footer><button id="muteBtn" class="toggle" type="button">Sound: Off</button></footer>
+</div>
+
+<!-- Screen 3: kiss menu -->
+<div class="container hidden" id="screen3">
+  <h2 class="big">Hehehe, caught you! 😘</h2>
+  <p>You’re now entitled to <strong>unlimited</strong> kisses from me.</p>
+  <div class="chips" aria-label="Pick your kiss">
+    <button data-type="cute">Cute kiss 💕</button>
+    <button data-type="sorry">Angry‑sorry kiss 😔💋</button>
+    <button data-type="romantic">Romantic kiss 💞</button>
+    <button data-type="random">Just‑because kiss 😘</button>
+  </div>
+  <div class="buttons" style="margin-top:16px">
+    <button id="moreBtn" class="secondary">More kisses!</button>
+  </div>
+  <footer>Tip: tap different types for surprises.</footer>
+</div>
+
+<!-- hidden overlay container -->
+<div class="hidden" id="overlayHost"></div>
+
+<script>
+  /* ======= small app state ======= */
+  const s1 = document.getElementById('screen1');
+  const s2 = document.getElementById('screen2');
+  const s3 = document.getElementById('screen3');
+  const startBtn = document.getElementById('startBtn');
+  const yesBtn = document.getElementById('yesBtn');
+  const noBtn  = document.getElementById('noBtn');
+  const kissCanvas = document.getElementById('kissCanvas');
+  const overlayHost = document.getElementById('overlayHost');
+  const moreBtn = document.getElementById('moreBtn');
+  const muteBtn = document.getElementById('muteBtn');
+
+  let yesScale = 1;
+  let noClicks = 0;
+  let audioEnabled = false;
+  let audioCtx;
+
+  const show = el => el.classList.remove('hidden');
+  const hide = el => el.classList.add('hidden');
+
+  startBtn.addEventListener('click', () => { hide(s1); show(s2); });
+
+  function updateYesScale(){
+    yesBtn.style.transform = `scale(${yesScale})`;
+    // Once big enough, show full-screen YES and make NO disappear
+    if (yesScale >= 2.6) {
+      showGiantYes();
+      hide(noBtn);
+    }
+  }
+
+  function showGiantYes(){
+    if (overlayHost.firstChild) return;
+    const layer = document.createElement('div');
+    layer.className = 'overlay';
+    const giant = document.createElement('button');
+    giant.className = 'giant';
+    giant.textContent = 'YES 💋';
+    giant.addEventListener('click', acceptYes);
+    layer.appendChild(giant);
+    overlayHost.appendChild(layer);
+    show(overlayHost);
+  }
+
+  noBtn.addEventListener('click', () => {
+    noClicks++;
+    // Grow YES and jiggle NO a bit
+    yesScale = Math.min(yesScale * 1.4 + 0.15, 7);
+    updateYesScale();
+
+    const randX = (Math.random()*40 - 20); // -20..20px
+    const randY = (Math.random()*20 - 10);
+    noBtn.style.transform = `translate(${randX}px, ${randY}px)`;
+    if (noClicks === 1) noBtn.textContent = 'Are you sure?';
+    else if (noClicks === 2) noBtn.textContent = 'Really sure??';
+    else if (noClicks === 3) noBtn.textContent = 'Last chance 😜';
+    else if (noClicks >= 4) noBtn.textContent = 'Too late 😘', noBtn.classList.add('muted');
+  });
+
+  yesBtn.addEventListener('click', acceptYes);
+
+  function acceptYes(){
+    hide(s2);
+    hide(overlayHost);
+    show(s3);
+    blastKisses(60);
+  }
+
+  moreBtn.addEventListener('click', () => blastKisses(80));
+
+  document.querySelectorAll('.chips button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.dataset.type;
+      let count = 60;
+      if (type === 'cute')       notify('A storm of cute kisses incoming! 💕');
+      else if (type === 'sorry') notify("I’m sorry, my love. Here are comforting kisses 💋"), count = 80;
+      else if (type === 'romantic') notify('Slow, romantic kisses just for you 💞'), count = 70;
+      else notify('Random surprise kisses! 😘');
+      blastKisses(count, type);
+    });
+  });
+
+  /* ======= kiss effects ======= */
+  function blastKisses(n = 80, type = 'random'){
+    for (let i = 0; i < n; i++){
+      setTimeout(() => spawnKiss(type), i * 12);
+    }
+    playKissSound();
+  }
+
+  function spawnKiss(type){
+    const el = document.createElement('span');
+    el.className = 'kiss';
+    let emoji = '💋';
+    if (type === 'cute') emoji = '😘';
+    else if (type === 'romantic') emoji = '💞';
+    else if (type === 'sorry') emoji = '💋';
+
+    el.textContent = emoji;
+    const startX = Math.random() * 100;         // vw
+    const dur = 4 + Math.random() * 3;          // 4..7s
+    const size = 20 + Math.random() * 36;       // px
+
+    el.style.left = `calc(${startX}vw - 10px)`;
+    el.style.bottom = `-20px`;
+    el.style.fontSize = `${size}px`;
+    el.style.animationDuration = `${dur}s`;
+
+    kissCanvas.appendChild(el);
+    // force reflow to start animation
+    void el.offsetWidth;
+    el.style.opacity = '1';
+    setTimeout(() => el.remove(), dur * 1000 + 200);
+  }
+
+  function notify(text){
+    const m = document.createElement('div');
+    m.textContent = text;
+    Object.assign(m.style, {
+      position:'fixed', bottom:'16px', left:'50%', transform:'translateX(-50%)',
+      background:'rgba(255,255,255,.95)', padding:'10px 14px', borderRadius:'999px',
+      boxShadow:'0 10px 24px rgba(0,0,0,.15)', zIndex:30
+    });
+    document.body.appendChild(m);
+    setTimeout(() => m.remove(), 2200);
+  }
+
+  /* ======= tiny synthesized "kiss pop" ======= */
+  muteBtn.addEventListener('click', () => {
+    audioEnabled = !audioEnabled;
+    muteBtn.textContent = audioEnabled ? 'Sound: On' : 'Sound: Off';
+    if (audioEnabled && !audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  });
+
+  function playKissSound(){
+    if (!audioEnabled) return;
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(500, now);
+    o.frequency.exponentialRampToValueAtTime(1800, now + 0.08);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(now); o.stop(now + 0.16);
+  }
+</script>
+</body>
+</html>
